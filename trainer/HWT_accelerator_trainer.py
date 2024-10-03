@@ -49,27 +49,21 @@ class  Trainer:
         # forward
         t = self.diffusion.sample_timesteps(images.shape[0]).to(self.device)
         x_t, noise = self.diffusion.noise_images(images, t)
-
-        # predicted_noise, high_nce_emb, low_nce_emb = self.model(x_t, t, style_ref, laplace_ref, content_ref, img_hw,
-        #                                                         aspect_ratio, tag='train')
-        with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
+        grad_norm = None
+        with accelerator.accumulate(self.model):
+            self.optimizer.zero_grad()
             predicted_noise, high_nce_emb, low_nce_emb = self.model(x_t, t, style_ref, laplace_ref, content_ref, tag='train')
             # calculate loss
             recon_loss = self.recon_criterion(predicted_noise, noise)
             high_nce_loss = self.nce_criterion(high_nce_emb, labels=wid)
             low_nce_loss = self.nce_criterion(low_nce_emb, labels=wid)
             loss = recon_loss + high_nce_loss + low_nce_loss
+            accelerator.backward(loss)
+            if accelerator.sync_gradients:
+                grad_norm = accelerator.clip_grad_norm_(model.parameters(), config.gradient_clip)
+            self.optimizer.step()
+            self.lr_scheduler.step()
 
-            # backward and update trainable parameters
-            # self.optimizer.zero_grad()
-            # loss.backward()
-            scaler.scale(loss).backward()
-            scaler.step(self.optimizer)
-            scaler.update()
-            self.optimizer.zero_grad()
-            # self.optimizer.step()
-
-            # if dist.get_rank() == 0:
             # log file
             loss_dict = {"reconstruct_loss": recon_loss.item(), "high_nce_loss": high_nce_loss.item(),
                         "low_nce_loss": low_nce_loss.item()}
@@ -154,16 +148,10 @@ class  Trainer:
             test_data['img_hw'].to(self.device), \
             test_data['aspect_ratio'].to(self.device)
 
-        # images, style_ref, laplace_ref, content_ref, = test_data['img'].to(self.device), \
-        #     test_data['style'].to(self.device), \
-        #     test_data['laplace'].to(self.device), \
-        #     test_data['content'].to(self.device), \
-
         load_content = ContentData()
         # forward
         texts = ['getting', 'both', 'success']
         for text in texts:
-            # rank = dist.get_rank()
             text_ref = load_content.get_content(text)
             text_ref = text_ref.to(self.device).repeat(style_ref.shape[0], 1, 1, 1)
             x = torch.randn((text_ref.shape[0], 4, style_ref.shape[2]//8, (text_ref.shape[1]*32)//8)).to(self.device)
@@ -175,7 +163,7 @@ class  Trainer:
 
     def train(self):
         """start training iterations"""
-        scaler = torch.cuda.amp.GradScaler()  
+        scaler = torch.cuda.amp.GradScaler()
         for epoch in range(cfg.SOLVER.EPOCHS):
             # self.data_loader.sampler.set_epoch(epoch)
             print(f"Epoch:{epoch}")

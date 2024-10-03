@@ -107,7 +107,7 @@ class Diffusion:
         return x, noise_list[0], high_nce_emb, low_nce_emb
 
     @torch.no_grad()
-    def ddim_sample(self, model, vae, n, x, styles, laplace, content, sampling_timesteps=50, eta=0):
+    def ddim_sample(self, model, vae, n, x, styles, laplace, content, sampling_timesteps=50, eta=0, config=None):
     # def ddim_sample(self, model, vae, n, x, styles, laplace, content, img_hw=None, aspect_ratio=None,sampling_timesteps=50, eta=0):
         model.eval()
 
@@ -145,8 +145,10 @@ class Diffusion:
 
         model.train()
         
-        latents = 1 / 0.18215 * x
-        image = vae.decode(latents).sample
+        latents = 1 / config.scale_factor * x
+        with torch.cuda.amp.autocast(
+                            enabled=(config.mixed_precision == 'fp16' or config.mixed_precision == 'bf16')):
+            image = vae.decode(latents).sample
 
         image = (image / 2 + 0.5).clamp(0, 1)
         image = image.cpu().permute(0, 2, 3, 1).contiguous().numpy()

@@ -12,7 +12,7 @@ import torch.distributed as dist
 from mmcv import Config
 from mmcv.runner import get_dist_info
 
-from diffusion.utils.logger import get_root_logger
+from utils.logger import get_root_logger
 
 os.environ["MOX_SILENT_MODE"] = "1"  # mute moxing log
 

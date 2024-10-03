@@ -67,7 +67,12 @@ class HWTDataset(Dataset):
                  content_type='unifont',
                  max_len=10,
                  transform=None,
+                 load_vae_feat=False,
+                 vae_path=None,
                  **kwargs):
+        self.load_vae_feat = load_vae_feat
+        if self.load_vae_feat:
+            self.vae_path = os.path.join(vae_path, type)
         self.transform = transform
         self.aspect_ratio = ASPECT_RATIO_64
         self.laplace = torch.tensor([[0, 1, 0], [1, -4, 1], [0, 1, 0]], dtype=torch.float
@@ -161,9 +166,8 @@ class HWTDataset(Dataset):
         image_name = self.data_dict[self.indices[index]]['image']
         label = self.data_dict[self.indices[index]]['label']
         wr_id = self.data_dict[self.indices[index]]['s_id']
-        img_path = os.path.join(self.image_path, wr_id, image_name)
         ori_h, ori_w = self.data_dict[self.indices[index]]['h'], self.data_dict[self.indices[index]]['w']
-        image = Image.open(img_path).convert('RGB')
+
         closest_size, closest_ratio = get_closest_ratio(ori_h, ori_w, self.aspect_ratio)
         self.closest_ratio = closest_ratio
         closest_size = list(map(lambda x: int(x), closest_size))
@@ -171,13 +175,22 @@ class HWTDataset(Dataset):
             resize_size = closest_size[0], int(ori_w * closest_size[0] / ori_h)
         else:
             resize_size = int(ori_h * closest_size[1] / ori_w), closest_size[1]
-        self.transform = T.Compose([
-            T.Resize(resize_size, interpolation=InterpolationMode.BICUBIC),  # Image.BICUBIC
-            T.CenterCrop(closest_size),
-            T.ToTensor(),
-            T.Normalize([.5], [.5]),
-        ])
-        image = self.transform(image)
+        if self.load_vae_feat:
+            feature_name = image_name.replace(".png", ".npy")
+            vae_path_idx = os.path.join(self.vae_path, wr_id, feature_name)
+            image = np.load(vae_path_idx)
+            image = torch.from_numpy(image)
+        else:
+            self.transform = T.Compose([
+                T.Resize(resize_size, interpolation=InterpolationMode.BICUBIC),  # Image.BICUBIC
+                T.CenterCrop(closest_size),
+                T.ToTensor(),
+                T.Normalize([.5], [.5]),
+            ])
+            img_path = os.path.join(self.image_path, wr_id, image_name)
+            image = Image.open(img_path).convert('RGB')
+            image = self.transform(image)
+
         style_ref, laplace_ref = self.get_style_ref(wr_id)
         style_ref = torch.from_numpy(style_ref).to(torch.float32)
         laplace_ref = torch.from_numpy(laplace_ref).to(torch.float32)

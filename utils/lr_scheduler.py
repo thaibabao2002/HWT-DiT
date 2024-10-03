@@ -3,7 +3,7 @@ from torch.optim import Optimizer
 from torch.optim.lr_scheduler import LambdaLR
 import math
 
-from diffusion.utils.logger import get_root_logger
+from utils.logger import get_root_logger
 
 
 def build_lr_scheduler(config, optimizer, train_dataloader, lr_scale_ratio):

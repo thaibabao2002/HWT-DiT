@@ -5,6 +5,7 @@ model_zoo/*.pth
 auto_*
 static/*
 files/*
+output/*
 .vscode/*
 Generated/*
 LICENSE

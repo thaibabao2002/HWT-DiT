@@ -52,6 +52,7 @@ class MultiHeadCrossAttention(nn.Module):
         q = self.q_linear(x).view(1, -1, self.num_heads, self.head_dim)
         kv = self.kv_linear(cond).view(1, -1, 2, self.num_heads, self.head_dim)
         k, v = kv.unbind(2)
+        # q, k, v = q.float(), k.float(), v.float()
         attn_bias = None
         if mask is not None:
             attn_bias = xformers.ops.fmha.BlockDiagonalMask.from_seqlens([N] * B, mask)
@@ -377,7 +378,7 @@ class T2IFinalLayer(nn.Module):
         )
         # self.scale_shift_table = nn.Parameter(torch.randn(2, hidden_size) / hidden_size ** 0.5)
         self.out_channels = out_channels
-        self.spatial_transformer = SpatialTransformer(768, 4, 128, context_dim=512)
+        self.spatial_transformer = SpatialTransformer(768, 4, 192, context_dim=512)
 
     def forward(self, x, y, t):
         shift, scale = self.adaLN_modulation(t).chunk(2, dim=1)

@@ -16,7 +16,7 @@ from timm.models.vision_transformer import Mlp, Attention
 from models.builder import MODELS
 from models.utils import auto_grad_checkpoint, to_2tuple
 from models.PixArt_blocks import t2i_modulate, WindowAttention, MultiHeadCrossAttention, T2IFinalLayer, \
-    TimestepEmbedder, SpatialTransformer, get_2d_sincos_pos_embed
+    TimestepEmbedder, SpatialTransformer, get_2d_sincos_pos_embed, CrossAttention
 from models.fusion import Mix_TR
 
 class PatchEmbed(nn.Module):
@@ -86,7 +86,6 @@ class PixArtMSBlock(nn.Module):
         #         self.scale_shift_table[None] + t.reshape(B, 6, -1)).chunk(6, dim=1)
         # x = x + self.drop_path(gate_msa * self.attn(t2i_modulate(self.norm1(x), shift_msa, scale_msa)))
         # x = x + self.cross_attn(x, y, mask)
-        # x = self.spatial_transformer(x, y)
         # x = x + self.drop_path(gate_mlp * self.mlp(t2i_modulate(self.norm2(x), shift_mlp, scale_mlp)))
 
 
@@ -94,7 +93,6 @@ class PixArtMSBlock(nn.Module):
         x = x + gate_msa.unsqueeze(1) * self.attn(modulate(self.norm1(x), shift_msa, scale_msa))
         x = x + gate_mlp.unsqueeze(1) * self.mlp(modulate(self.norm2(x), shift_mlp, scale_mlp))
         x = self.spatial_transformer(x, y)
-        x = self.cross_attn(x, y)
         return x
 
 
@@ -155,9 +153,9 @@ class PixArtMS(nn.Module):
 
         x = self.x_embedder(x) + pos_embed  # (N, T, D), where T = H * W / patch_size ** 2
         t = self.t_embedder(timestep)  # (N, D)
-        t0 = self.t_block(t)
+        # t0 = self.t_block(t)
         for block in self.blocks:
-            x = auto_grad_checkpoint(block, x, context, t0, **kwargs)  # (N, T, D) #support grad checkpoint
+            x = auto_grad_checkpoint(block, x, context, t, **kwargs)  # (N, T, D) #support grad checkpoint
         x = self.final_layer(x, context, t)  # (N, T, patch_size ** 2 * out_channels)
         x = self.unpatchify(x)  # (N, out_channels, H, W)
         if tag == 'train':
