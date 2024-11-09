@@ -18,9 +18,11 @@ ASPECT_RATIO_64 = {
     '0.22222': [64.0, 288.0], '0.2': [64, 320]
 }
 
-text_path = {'train': 'data/IAM64_train_add.txt',
-             'test': 'data/IAM64_test_add.txt'}
+text_path = {'train': '/home/baotb/Desktop/D/BaoTB/code/One-DM/data/IAM_train_test_64_32x_3_channel/train.txt',
+             'test': '/home/baotb/Desktop/D/BaoTB/code/One-DM/data/IAM_train_test_64_32x_3_channel/test.txt'}
 letters = '_Only thewigsofrcvdampbkuq.A-210xT5\'MDL,RYHJ"ISPWENj&BC93VGFKz();#:!7U64Q8?+*ZX/%'
+# letters = '_Only thewigsofrcvdampbkuq.A-210xT5\'MDL,RYHJ"ISPWENj&BC93VGFKz();#:!7U64Q8?+*ZX/%ạàÀảẢãÃáÁẠăĂằẰẳẲẵẴắẮặẶâÂầẦẩẨẫẪấẤậẬđĐèÈẻẺẽẼéÉẹẸêÊềỀểỂễỄếẾệỆìÌỉỈĩĨíÍịỊòÒỏỎõÕóÓọỌôÔồỒổỔỗỖốỐộỘơƠờỜởỞỡỠớỚợỢùÙủỦũŨúÚụỤưƯừỪửỬữỮứỨựỰỳỲỷỶỹỸýÝỵỴ'
+
 style_len = 352
 
 
@@ -52,7 +54,6 @@ class Resize_with_pad:
         # check if the original and final aspect ratios are the same within a margin
         wp = int(h_1 * self.w / self.h - w_1)
         if wp > 0:
-            # image = F.pad(image, [0, 0, wp, 0], [i[1] for i in image.getextrema()], padding_mode="constant")
             image = F.pad(image, [0, 0, wp, 0], 255, padding_mode="constant")
         return F.resize(image, [self.h, self.w])
 
@@ -94,7 +95,6 @@ class HWTDataset(Dataset):
         print(self.ratio_nums)
         self.indices = list(self.data_dict.keys())
         self.con_symbols = self.get_symbols(content_type)
-        # self.transform = get_transform((64, 320))
     def load_data(self, data_path):
         with open(data_path, 'r') as f:
             train_data = f.readlines()
@@ -102,11 +102,16 @@ class HWTDataset(Dataset):
             full_dict = {}
             idx = 0
             for idxx, i in enumerate(train_data):
-                s_id = i[0].split(',')[0]
-                image = i[0].split(',')[1] + '.png'
-                transcription = i[1]
-                ori_h = int(i[2])
-                ori_w = int(i[3])
+                i_norm = []
+                if len(i) > 4:
+                    continue
+                else:
+                    i_norm = i
+                s_id = i_norm[0].split(',')[0]
+                image = i_norm[0].split(',')[1] + '.png'
+                transcription = i_norm[1]
+                ori_h = int(i_norm[2])
+                ori_w = int(i_norm[3])
                 closest_size, closest_ratio = get_closest_ratio(ori_h, ori_w, self.aspect_ratio)
                 self.ratio_nums[closest_ratio] += 1
                 if len(self.ratio_index[closest_ratio]) == 0:
@@ -205,7 +210,6 @@ class HWTDataset(Dataset):
                 'image_name': image_name}
 
     def __getitem__(self, idx):
-        # return self.getdata(idx)
         for _ in range(20):
             try:
                 return self.getdata(idx)
@@ -236,8 +240,6 @@ class HWTDataset(Dataset):
         laplace_ref = torch.zeros([len(batch), batch[0]['laplace'].shape[0], batch[0]['laplace'].shape[1], max_s_width],
                                   dtype=torch.float32)
         target = torch.zeros([len(batch), max(target_lengths)], dtype=torch.int32)
-        # imgs = [item['img'] for item in batch]
-        # imgs = torch.stack(imgs)
         img_hws = [item['img_hw'] for item in batch]
         img_hws = torch.stack(img_hws)
 

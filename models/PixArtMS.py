@@ -12,12 +12,16 @@ import torch
 import torch.nn as nn
 from timm.models.layers import DropPath
 from timm.models.vision_transformer import Mlp, Attention
-
+from timm.layers.mlp import SwiGLU
+import torch.nn.functional as F
+from einops import rearrange
 from models.builder import MODELS
 from models.utils import auto_grad_checkpoint, to_2tuple
-from models.PixArt_blocks import t2i_modulate, WindowAttention, MultiHeadCrossAttention, T2IFinalLayer, \
-    TimestepEmbedder, SpatialTransformer, get_2d_sincos_pos_embed, CrossAttention
+
+from models.PixArt_blocks import t2i_modulate, RMSNorm, T2IFinalLayer,\
+    TimestepEmbedder, CrossAttention, MultiheadDiffAttn, get_2d_sincos_pos_embed
 from models.fusion import Mix_TR
+
 
 class PatchEmbed(nn.Module):
     """ 2D Image to Patch Embedding
@@ -50,51 +54,41 @@ class PatchEmbed(nn.Module):
 def modulate(x, shift, scale):
     return x * (1 + scale.unsqueeze(1)) + shift.unsqueeze(1)
 
+
 class PixArtMSBlock(nn.Module):
     """
     A PixArt block with adaptive layer norm zero (adaLN-Zero) conditioning.
     """
 
-    def __init__(self, hidden_size, num_heads, mlp_ratio=4.0, drop_path=0., window_size=0, input_size=None,
-                 use_rel_pos=False, **block_kwargs):
+    def __init__(self, hidden_size, num_heads, mlp_ratio=4.0, drop_path=0., depth=12, context_dim=512, qk_norm=True, differential=True, **block_kwargs):
         super().__init__()
         self.hidden_size = hidden_size
-        self.norm1 = nn.LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6)
-        self.attn = Attention(hidden_size,
-                              num_heads=num_heads,
-                              qkv_bias=True, **block_kwargs)
-        # self.attn = WindowAttention(hidden_size, num_heads=num_heads, qkv_bias=True,
-        #                             input_size=input_size if window_size == 0 else (window_size, window_size),
-        #                             use_rel_pos=use_rel_pos, **block_kwargs)
-        # self.cross_attn = MultiHeadCrossAttention(hidden_size, num_heads, **block_kwargs)
-        self.norm2 = nn.LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6)
-        # to be compatible with lower version pytorch
-        approx_gelu = lambda: nn.GELU(approximate="tanh")
-        self.mlp = Mlp(in_features=hidden_size, hidden_features=int(hidden_size * mlp_ratio), act_layer=approx_gelu,
-                       drop=0)
+        
+        if differential:
+            self.norm1 = RMSNorm(hidden_size, eps=1e-5, elementwise_affine=True)
+            self.norm2 = RMSNorm(hidden_size, eps=1e-5, elementwise_affine=True)
+            self.attn = MultiheadDiffAttn(embed_dim=hidden_size,
+                                        depth=depth, num_heads=num_heads, qk_norm=qk_norm)
+            self.mlp = SwiGLU(in_features=hidden_size, hidden_features=int(hidden_size * mlp_ratio), drop=0)
+        else:
+            self.norm1 = nn.LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6)
+            self.norm2 = nn.LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6)
+            approx_gelu = lambda: nn.GELU(approximate="tanh")
+            self.attn = Attention(hidden_size, num_heads=num_heads, qkv_bias=True, qk_norm=qk_norm)
+            self.mlp = Mlp(in_features=hidden_size, hidden_features=int(hidden_size * mlp_ratio), act_layer=approx_gelu,drop=0)
+
+        self.cross_attn = CrossAttention(query_dim=hidden_size, context_dim=context_dim, heads=num_heads, dim_head=hidden_size//num_heads)
         self.drop_path = DropPath(drop_path) if drop_path > 0. else nn.Identity()
         self.scale_shift_table = nn.Parameter(torch.randn(6, hidden_size) / hidden_size ** 0.5)
-        self.adaLN_modulation = nn.Sequential(
-            nn.SiLU(),
-            nn.Linear(hidden_size, 6 * hidden_size, bias=True)
-        )
-        self.spatial_transformer = SpatialTransformer(768, 4, 192, context_dim=512)
 
-    def forward(self, x, y, t, mask=None, **kwargs):
-        # B, N, C = x.shape
-        # shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = (
-        #         self.scale_shift_table[None] + t.reshape(B, 6, -1)).chunk(6, dim=1)
-        # x = x + self.drop_path(gate_msa * self.attn(t2i_modulate(self.norm1(x), shift_msa, scale_msa)))
-        # x = x + self.cross_attn(x, y, mask)
-        # x = x + self.drop_path(gate_mlp * self.mlp(t2i_modulate(self.norm2(x), shift_mlp, scale_mlp)))
-
-
-        shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = self.adaLN_modulation(t).chunk(6, dim=1)
-        x = x + gate_msa.unsqueeze(1) * self.attn(modulate(self.norm1(x), shift_msa, scale_msa))
-        x = x + gate_mlp.unsqueeze(1) * self.mlp(modulate(self.norm2(x), shift_mlp, scale_mlp))
-        x = self.spatial_transformer(x, y)
+    def forward(self, x, y, t, **kwargs):
+        B, N, C = x.shape
+        shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = (
+                self.scale_shift_table[None] + t.reshape(B, 6, -1)).chunk(6, dim=1)
+        x = x + self.drop_path(gate_msa * self.attn(t2i_modulate(self.norm1(x), shift_msa, scale_msa)))
+        x = x + self.cross_attn(x, y)
+        x = x + self.drop_path(gate_mlp * self.mlp(t2i_modulate(self.norm2(x), shift_mlp, scale_mlp)))
         return x
-
 
 #############################################################################
 #                                 Core PixArt Model                                #
@@ -106,18 +100,20 @@ class PixArtMS(nn.Module):
     """
 
     def __init__(self, patch_size=2, in_channels=4, hidden_size=1152, depth=28, num_heads=4,
-                 mlp_ratio=4.0, class_dropout_prob=0.1, drop_path: float = 0., **kwargs):
+                 mlp_ratio=4.0, drop_path: float = 0., context_dim=512, qk_norm=True, differential=True,**kwargs):
         super().__init__()
-        self.patch_size=patch_size
-        self.in_channels=in_channels
-        self.hidden_size=hidden_size
-        self.depth=depth
-        self.num_heads=num_heads
-        self.mlp_ratio=mlp_ratio
-        self.class_dropout_prob=class_dropout_prob
-        self.drop_path=drop_path
+        self.patch_size = patch_size
+        self.in_channels = in_channels
+        self.hidden_size = hidden_size
+        self.depth = depth
+        self.num_heads = num_heads
+        self.mlp_ratio = mlp_ratio
+        self.drop_path = drop_path
         self.out_channels = in_channels
         self.h = self.w = 0
+        self.context_dim = context_dim
+        self.differential = differential
+        self.qk_norm = qk_norm
         self.t_block = nn.Sequential(
             nn.SiLU(),
             nn.Linear(hidden_size, 6 * hidden_size, bias=True)
@@ -126,12 +122,14 @@ class PixArtMS(nn.Module):
         self.t_embedder = TimestepEmbedder(hidden_size)
         drop_path = [x.item() for x in torch.linspace(0, self.drop_path, self.depth)]  # stochastic depth decay rule
         self.blocks = nn.ModuleList([
-            PixArtMSBlock(self.hidden_size, self.num_heads, mlp_ratio=self.mlp_ratio, drop_path=drop_path[i])
+            PixArtMSBlock(self.hidden_size, self.num_heads, mlp_ratio=self.mlp_ratio, drop_path=drop_path[i],
+                          depth=self.depth, context_dim=self.context_dim, qk_norm=self.qk_norm, differential=self.differential)
             for i in range(self.depth)
         ])
-        self.final_layer = T2IFinalLayer(self.hidden_size, self.patch_size, self.out_channels)
-        self.mix_net = Mix_TR(d_model=512)
+        self.final_layer = T2IFinalLayer(self.hidden_size, self.patch_size, self.out_channels, self.differential)
+        self.mix_net = Mix_TR(d_model=self.context_dim)
         self.initialize()
+
     def forward(self, x, timestep, style=None, laplace=None, content=None, tag='train', **kwargs):
         """
         Forward pass of PixArt.
@@ -153,37 +151,31 @@ class PixArtMS(nn.Module):
 
         x = self.x_embedder(x) + pos_embed  # (N, T, D), where T = H * W / patch_size ** 2
         t = self.t_embedder(timestep)  # (N, D)
-        # t0 = self.t_block(t)
+        t0 = self.t_block(t)
         for block in self.blocks:
-            x = auto_grad_checkpoint(block, x, context, t, **kwargs)  # (N, T, D) #support grad checkpoint
-        x = self.final_layer(x, context, t)  # (N, T, patch_size ** 2 * out_channels)
+            x = auto_grad_checkpoint(block, x, context, t0, **kwargs)  # (N, T, D) #support grad checkpoint
+        x = self.final_layer(x, t)  # (N, T, patch_size ** 2 * out_channels)
         x = self.unpatchify(x)  # (N, out_channels, H, W)
         if tag == 'train':
             return x, high_nce_emb, low_nce_emb
         else:
             return x
 
-    def forward_with_dpmsolver(self, x, timestep, style=None, laplace=None, content=None, **kwargs):
-        """
-        dpm solver donnot need variance prediction
-        """
-        # https://github.com/openai/glide-text2im/blob/main/notebooks/text2im.ipynb
-        model_out = self.forward(x, timestep, style=style, laplace=laplace, content=content, tag='test', **kwargs)
-        return model_out.chunk(2, dim=1)[0]
+    def forward_backbone(self, x, timestep, style=None, laplace=None, content=None, **kwargs):
+        x = x.to(self.dtype)
+        timestep = timestep.to(self.dtype)
+        context, high_nce_emb, low_nce_emb = self.mix_net(style.to(self.dtype), laplace.to(self.dtype),
+                                                          content.to(self.dtype))
+        self.h, self.w = x.shape[-2] // self.patch_size, x.shape[-1] // self.patch_size
+        pos_embed = torch.from_numpy(
+            get_2d_sincos_pos_embed(self.hidden_size, (self.h, self.w))).unsqueeze(0).to(x.device).to(self.dtype)
 
-    def forward_with_cfg(self, x, timestep, style=None, laplace=None, content=None, cfg_scale=None, **kwargs):
-        """
-        Forward pass of PixArt, but also batches the unconditional forward pass for classifier-free guidance.
-        """
-        # https://github.com/openai/glide-text2im/blob/main/notebooks/text2im.ipynb
-        half = x[: len(x) // 2]
-        combined = torch.cat([half, half], dim=0)
-        model_out = self.forward(combined, timestep, style=style, laplace=laplace, content=content, tag='test')
-        eps, rest = model_out[:, :3], model_out[:, 3:]
-        cond_eps, uncond_eps = torch.split(eps, len(eps) // 2, dim=0)
-        half_eps = uncond_eps + cfg_scale * (cond_eps - uncond_eps)
-        eps = torch.cat([half_eps, half_eps], dim=0)
-        return torch.cat([eps, rest], dim=1)
+        x = self.x_embedder(x) + pos_embed  # (N, T, D), where T = H * W / patch_size ** 2
+        t = self.t_embedder(timestep)  # (N, D)
+        t0 = self.t_block(t)
+        for block in self.blocks:
+            x = auto_grad_checkpoint(block, x, context, t0, **kwargs)  # (N, T, D) #support grad checkpoint
+        return x
 
     def unpatchify(self, x):
         """
@@ -217,21 +209,14 @@ class PixArtMS(nn.Module):
         nn.init.normal_(self.t_embedder.mlp[2].weight, std=0.02)
         nn.init.normal_(self.t_block[1].weight, std=0.02)
 
-        # Zero-out adaLN modulation layers in PixArt blocks:
-        # for block in self.blocks:
-        #     nn.init.constant_(block.cross_attn.proj.weight, 0)
-        #     nn.init.constant_(block.cross_attn.proj.bias, 0)
-
-        # Zero-out output layers:
-        nn.init.constant_(self.final_layer.linear.weight, 0)
-        nn.init.constant_(self.final_layer.linear.bias, 0)
     @property
     def dtype(self):
         return next(self.parameters()).dtype
 
+
 #################################################################################
 #                                   PixArt Configs                                  #
 #################################################################################
-@MODELS.register_module()   
+@MODELS.register_module()
 def PixArtMS_XL_2(**kwargs):
-    return PixArtMS(depth=12, hidden_size=768, patch_size=2, num_heads=4, **kwargs)
+    return PixArtMS(depth=18, hidden_size=1024, patch_size=2, num_heads=4, **kwargs)

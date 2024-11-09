@@ -44,7 +44,7 @@ class AspectRatioBatchSampler(BatchSampler):
         self._aspect_ratio_buckets = {ratio: [] for ratio in aspect_ratios}
         self.current_available_bucket_keys =  [float(k) for k, v in self.ratio_nums_gt.items() if v >= valid_num]
 
-    def __iter__(self) -> Sequence[int]:
+    def __iter__(self):
         for idx in self.sampler:
             data_info = self.dataset.get_data_info(idx)
             height, width =  data_info['height'], data_info['width']

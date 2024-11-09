@@ -24,12 +24,11 @@ def _ntuple(n):
 to_1tuple = _ntuple(1)
 to_2tuple = _ntuple(2)
 
-def set_grad_checkpoint(model, use_fp32_attention=False, gc_step=1):
+def set_grad_checkpoint(model, gc_step=1):
     assert isinstance(model, nn.Module)
 
     def set_attr(module):
         module.grad_checkpointing = True
-        module.fp32_attention = use_fp32_attention
         module.grad_checkpointing_step = gc_step
     model.apply(set_attr)
 

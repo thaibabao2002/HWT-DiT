@@ -8,9 +8,9 @@ from diffusers.models import AutoencoderKL
 from tqdm import tqdm
 
 if __name__ == "__main__":
-    image_path = "data/IAM64-new"
-    vae_feature_path = "data/IAM64_feature"
-    vae_pretrained = "runwayml/stable-diffusion-v1-5"
+    image_path = "" ### Input images path
+    vae_feature_path = "" ### Output features path
+    vae_pretrained = "runwayml/stable-diffusion-v1-5" ### VAE model path
     scale_factor = 0.18215
     os.makedirs(vae_feature_path, exist_ok=True)
 
@@ -18,7 +18,7 @@ if __name__ == "__main__":
     
     transform = T.Compose([
         T.ToTensor(),
-        T.Normalize([.5], [.5]),
+        T.Normalize([.5, .5, .5], [.5, .5, .5]),
     ])
     vae = AutoencoderKL.from_pretrained(vae_pretrained, subfolder="vae").to("cuda")
     vae.requires_grad_(False)

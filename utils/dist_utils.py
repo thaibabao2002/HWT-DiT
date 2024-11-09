@@ -264,39 +264,6 @@ def gather_layer_with_group(data, group=None, group_size=None):
         group_size = get_world_size()
     return GatherLayer.apply(data, group, group_size)
 
-from typing import Union
-import math
-# from torch.distributed.fsdp.fully_sharded_data_parallel import TrainingState_, _calc_grad_norm
-
-@torch.no_grad()
-def clip_grad_norm_(
-    self, max_norm: Union[float, int], norm_type: Union[float, int] = 2.0
-) -> None:
-    self._lazy_init()
-    self._wait_for_previous_optim_step()
-    assert self._is_root, "clip_grad_norm should only be called on the root (parent) instance"
-    self._assert_state(TrainingState_.IDLE)
-
-    max_norm = float(max_norm)
-    norm_type = float(norm_type)
-    # Computes the max norm for this shard's gradients and sync's across workers
-    local_norm = _calc_grad_norm(self.params_with_grad, norm_type).cuda()  # type: ignore[arg-type]
-    if norm_type == math.inf:
-        total_norm = local_norm
-        dist.all_reduce(total_norm, op=torch.distributed.ReduceOp.MAX, group=self.process_group)
-    else:
-        total_norm = local_norm ** norm_type
-        dist.all_reduce(total_norm, group=self.process_group)
-        total_norm = total_norm ** (1.0 / norm_type)
-
-    clip_coef = torch.tensor(max_norm, dtype=total_norm.dtype, device=total_norm.device) / (total_norm + 1e-6)
-    if clip_coef < 1:
-        # multiply by clip_coef, aka, (max_norm/total_norm).
-        for p in self.params_with_grad:
-            assert p.grad is not None
-            p.grad.detach().mul_(clip_coef.to(p.grad.device))
-    return total_norm
-
 
 def flush():
     gc.collect()
