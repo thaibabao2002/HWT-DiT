@@ -50,7 +50,7 @@ valid_num=0  # take as valid aspect-ratio when sample number >= valid_num
 
 # data
 load_vae_feat = False
-vae_path = "" # VAE features path
-IMAGE_PATH = "" # Image folder path
-STYLE_PATH = "" # Style folder path
-LAPLACE_PATH = "" # Laplace image folder path
+vae_path = "/home/baotb/Desktop/D/BaoTB/code/One-DM/data/IAM64_feature_64_32x_3_channel"
+IMAGE_PATH = "/home/baotb/Desktop/D/BaoTB/code/One-DM/data/IAM_train_test_64_32x_3_channel"
+STYLE_PATH = "/home/baotb/Desktop/D/BaoTB/code/One-DM/data/IAM_train_test_64_32x_3_channel"
+LAPLACE_PATH = "/home/baotb/Desktop/D/BaoTB/code/One-DM/data/IAM_train_test_64_32x_laplace_3_channel"

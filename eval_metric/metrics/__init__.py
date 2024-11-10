@@ -1,0 +1,3 @@
+from .hwd_score import calculate_hwd_given_paths
+from .fid_score import calculate_fid_given_paths
+from .cer_score import calculate_cer_given_paths_txt

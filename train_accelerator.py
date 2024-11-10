@@ -1,6 +1,5 @@
 import os
 import sys
-import types
 import time
 import argparse
 import datetime
@@ -34,6 +33,7 @@ from utils.lr_scheduler import build_lr_scheduler
 warnings.filterwarnings("ignore")  # ignore warning
 current_file_path = Path(__file__).resolve()
 sys.path.insert(0, str(current_file_path.parent.parent))
+
 
 def save_images(images, path):
     grid = torchvision.utils.make_grid(images)
@@ -75,7 +75,8 @@ def log_validation(model, step, device, vae=None):
         torch.cuda.empty_cache()
         text_ref = load_content.get_content(text)
         text_ref = text_ref.to(accelerator.device).repeat(style_ref.shape[0], 1, 1, 1)
-        x = torch.randn((text_ref.shape[0], 4, style_ref.shape[2] // 8, (text_ref.shape[1] * 32) // 8)).to(accelerator.device)
+        x = torch.randn((text_ref.shape[0], 4, style_ref.shape[2] // 8, (text_ref.shape[1] * 32) // 8)).to(
+            accelerator.device)
         preds = diffusion.ddim_sample(model, vae, images.shape[0], x, style_ref, laplace_ref, text_ref, config=config)
         out_path = os.path.join(os.path.join(config.work_dir, "save_sample_dir"), f"Step-{step}-{text}.png")
         save_images(preds, out_path)
@@ -115,7 +116,8 @@ def train():
                 images = data['img'].to(accelerator.device, dtype=data_type)
             else:
                 with torch.no_grad():
-                    with torch.cuda.amp.autocast(enabled=(config.mixed_precision == 'fp16' or config.mixed_precision == 'bf16')):
+                    with torch.cuda.amp.autocast(
+                            enabled=(config.mixed_precision == 'fp16' or config.mixed_precision == 'bf16')):
                         images = vae.encode(images).latent_dist.sample() * config.scale_factor
 
             # forward
@@ -229,6 +231,7 @@ def parse_args():
     args = parser.parse_args()
     return args
 
+
 if __name__ == "__main__":
     args = parse_args()
     config = read_config(args.config)
@@ -304,7 +307,8 @@ if __name__ == "__main__":
         config.load_from = args.load_from
     if config.load_from is not None:
         missing, unexpected = load_checkpoint(
-            config.load_from, model, load_ema=config.get('load_ema', False), resume_lr_scheduler=False, resume_optimizer=False)
+            config.load_from, model, load_ema=config.get('load_ema', False), resume_lr_scheduler=False,
+            resume_optimizer=False)
         logger.warning(f'Missing keys: {missing}')
         logger.warning(f'Unexpected keys: {unexpected}')
 
@@ -322,7 +326,8 @@ if __name__ == "__main__":
         ocr_model = ocr_model.to(accelerator.device)
 
     """ set dataset """
-    train_dataset = HWTDataset(config.IMAGE_PATH, config.STYLE_PATH, config.LAPLACE_PATH, "train", load_vae_feat=config.load_vae_feat, vae_path=config.vae_path)
+    train_dataset = HWTDataset(config.IMAGE_PATH, config.STYLE_PATH, config.LAPLACE_PATH, "train",
+                               load_vae_feat=config.load_vae_feat, vae_path=config.vae_path)
     print('number of training images: ', len(train_dataset))
     batch_sampler = AspectRatioBatchSampler(sampler=RandomSampler(train_dataset), dataset=train_dataset,
                                             batch_size=config.train_batch_size,
@@ -331,7 +336,8 @@ if __name__ == "__main__":
                                             ratio_nums=train_dataset.ratio_nums, valid_num=config.valid_num)
     train_loader = build_dataloader(train_dataset, batch_sampler=batch_sampler, num_workers=config.num_workers,
                                     collate_fn=train_dataset.collate_fn_)
-    test_dataset = HWTDataset(config.IMAGE_PATH, config.STYLE_PATH, config.LAPLACE_PATH, "test", load_vae_feat=config.load_vae_feat, vae_path=config.vae_path)
+    test_dataset = HWTDataset(config.IMAGE_PATH, config.STYLE_PATH, config.LAPLACE_PATH, "test",
+                              load_vae_feat=config.load_vae_feat, vae_path=config.vae_path)
     print('number of testing images: ', len(test_dataset))
 
     test_batch_sampler = AspectRatioBatchSampler(sampler=RandomSampler(test_dataset), dataset=test_dataset,

@@ -1,0 +1,10 @@
+(*) FID (Fréchet Inception Distance): score >= 0 (the smaller, the better)
+    Feature extraction is based on InceptionV3.
+
+(*) HWD (Handwriting Distance): score >= 0 (the smaller, the better)
+    Feature extraction is based on VGG16.
+        Calculate the average of all features for each author in the real dataset (and similarly for fake).
+        Then, compute the Euclidean distance between the two average vectors (real vs. fake) for each author to obtain an individual author score.
+        HWD = mean(score) for all authors.
+
+(*) CER (Character Error Rate): score in range [0, 1] (the smaller, the better)

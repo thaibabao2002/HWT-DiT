@@ -79,7 +79,8 @@ def log_validation(model, step, device, vae=None):
         text_ref = text_ref.to(accelerator.device).repeat(style_ref.shape[0], 1, 1, 1)
         x = torch.randn((text_ref.shape[0], 4, style_ref.shape[2] // 8, (text_ref.shape[1] * 32) // 8)).to(
             accelerator.device)
-        preds = diffusion.ddim_sample(model, vae, images.shape[0], x, style_ref, laplace_ref, text_ref, config=config, sampling_timesteps=4)
+        preds = diffusion.ddim_sample(model, vae, images.shape[0], x, style_ref, laplace_ref, text_ref, config=config,
+                                      sampling_timesteps=4)
         out_path = os.path.join(os.path.join(config.work_dir, "save_sample_dir"), f"Step-{step}-{text}.png")
         save_images(preds, out_path)
 
@@ -87,6 +88,7 @@ def log_validation(model, step, device, vae=None):
     del images, style_ref, laplace_ref, content_ref, img_hw, aspect_ratio, preds, text_ref
     flush()
     return image_logs
+
 
 def get_x0_from_noise(sample, model_output, alphas_cumprod, timestep):
     alpha_prod_t = alphas_cumprod[timestep].reshape(-1, 1, 1, 1)
@@ -124,6 +126,7 @@ def compute_distribution_matching_loss(latents, style_ref, laplace_ref, content_
     loss = 0.5 * F.mse_loss(original_latents.float(), (original_latents - grad).detach().float(), reduction="mean")
     return loss
 
+
 def compute_cls_logits(image, style_ref, laplace_ref, content_ref):
     timesteps = torch.randint(
         0, denoising_timestep, [image.shape[0]], device=image.device, dtype=torch.long
@@ -135,12 +138,14 @@ def compute_cls_logits(image, style_ref, laplace_ref, content_ref):
     logits = cls_pred_branch(rep[:, 0].to(next(cls_pred_branch.parameters()).dtype))
     return logits
 
+
 def compute_generator_clean_cls_loss(generated_image, style_ref, laplace_ref, content_ref):
     pred_realism_on_fake_with_grad = compute_cls_logits(
         generated_image, style_ref, laplace_ref, content_ref
     )
     loss = F.softplus(-pred_realism_on_fake_with_grad).mean()
     return loss
+
 
 def compute_guidance_clean_cls_loss(real_image, fake_image, style_ref, laplace_ref, content_ref):
     pred_realism_on_real = compute_cls_logits(
@@ -151,6 +156,7 @@ def compute_guidance_clean_cls_loss(real_image, fake_image, style_ref, laplace_r
     )
     classification_loss = F.softplus(pred_realism_on_fake).mean() + F.softplus(-pred_realism_on_real).mean()
     return classification_loss
+
 
 def compute_loss_fake(latents, style_ref, laplace_ref, content_ref):
     latents = latents.detach()
@@ -172,6 +178,7 @@ def compute_loss_fake(latents, style_ref, laplace_ref, content_ref):
         (fake_noise_pred.float() - noise.float()) ** 2
     )
     return loss_fake
+
 
 @torch.no_grad()
 def sample_backward(noisy_image, style_ref, laplace_ref, content_ref):
@@ -225,7 +232,8 @@ def train():
                 data_type = torch.float16
             elif accelerator.mixed_precision == "bf16":
                 data_type = torch.bfloat16
-            images, style_ref, laplace_ref, content_ref, wid, target, target_lengths = data['img'].to(accelerator.device, dtype=data_type), \
+            images, style_ref, laplace_ref, content_ref, wid, target, target_lengths = data['img'].to(
+                accelerator.device, dtype=data_type), \
                 data['style'].to(accelerator.device, dtype=data_type), \
                 data['laplace'].to(accelerator.device, dtype=data_type), \
                 data['content'].to(accelerator.device, dtype=data_type), \
@@ -244,7 +252,7 @@ def train():
             with accelerator.accumulate(model) and accelerator.accumulate(model_fake):
                 noise = torch.randn_like(images, device=accelerator.device, dtype=data_type)
                 timesteps, noisy_image = prepare_denoising_data(noise, style_ref, laplace_ref, content_ref)
-                generated_noise, high_nce_emb, low_nce_emb  = model(
+                generated_noise, high_nce_emb, low_nce_emb = model(
                     noisy_image, timesteps.long(), style_ref, laplace_ref, content_ref, tag='train')
 
                 alpha_hat_t = diffusion.alpha_hat[timesteps][:, None, None, None]
@@ -266,7 +274,8 @@ def train():
 
                 ### Guidance
                 loss_fake_mean = compute_loss_fake(generated_image, style_ref, laplace_ref, content_ref)
-                guidance_cls_loss = compute_guidance_clean_cls_loss(images, generated_image, style_ref, laplace_ref, content_ref)
+                guidance_cls_loss = compute_guidance_clean_cls_loss(images, generated_image, style_ref, laplace_ref,
+                                                                    content_ref)
                 guidance_loss = loss_fake_mean + guidance_cls_loss * guidance_cls_loss_weight
                 accelerator.backward(guidance_loss)
                 guidance_grad_norm = accelerator.clip_grad_norm_(model_fake.parameters(), 10)
@@ -437,11 +446,11 @@ if __name__ == "__main__":
                         config.grad_checkpointing,
                         **model_kwargs).train()
     model_real = build_model(config.model,
-                        config.grad_checkpointing,
-                        **model_kwargs).train()
+                             config.grad_checkpointing,
+                             **model_kwargs).train()
     model_fake = build_model(config.model,
-                        config.grad_checkpointing,
-                        **model_kwargs).train()
+                             config.grad_checkpointing,
+                             **model_kwargs).train()
 
     logger.info(f"{model.__class__.__name__} Model Parameters: {sum(p.numel() for p in model.parameters()):,}")
 

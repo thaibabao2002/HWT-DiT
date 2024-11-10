@@ -95,6 +95,7 @@ class HWTDataset(Dataset):
         print(self.ratio_nums)
         self.indices = list(self.data_dict.keys())
         self.con_symbols = self.get_symbols(content_type)
+
     def load_data(self, data_path):
         with open(data_path, 'r') as f:
             train_data = f.readlines()
@@ -277,6 +278,7 @@ class HWTDataset(Dataset):
 
 
 """prepare the content image during inference"""
+
 
 class ContentData(HWTDataset):
     def __init__(self, content_type='unifont') -> None:
